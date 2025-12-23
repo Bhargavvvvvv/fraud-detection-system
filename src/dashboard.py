@@ -7,23 +7,18 @@ import altair as alt
 import os
 import sys
 
-# Add the current directory to path so we can import utils
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from utils import get_kafka_consumer, get_redis_client
 
-# --- PAGE CONFIG ---
 st.set_page_config(page_title="🛡️ Fraud Guardian Live", layout="wide", page_icon="🛡️")
 
-# --- PATH CONFIG ---
-# This helps the app find the model file whether you run it from root or src
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'fraud_model.joblib')
 COLUMNS_PATH = os.path.join(BASE_DIR, 'models', 'model_columns.joblib')
 
-# --- INIT BACKEND ---
 @st.cache_resource
 def init_resources():
-    # Load Model
     try:
         model = joblib.load(MODEL_PATH)
         model_cols = joblib.load(COLUMNS_PATH)
@@ -31,19 +26,15 @@ def init_resources():
         st.error(f"Model files not found at {MODEL_PATH}. Did you run train_model.py?")
         st.stop()
     
-    # Get connections from utils.py
     redis = get_redis_client()
-    consumer = get_kafka_consumer('streamlit-dashboard-group')
-    
+    consumer = get_kafka_consumer('streamlit-dashboard-group')    
     return model, model_cols, redis, consumer
 
 model, model_columns, redis, consumer = init_resources()
 
-# --- DASHBOARD LAYOUT ---
-st.title("🛡️ Real-Time Fraud Detection System")
+st.title("Real-Time Fraud Detection System")
 st.markdown("Listening to **Kafka Event Stream** | Enriching with **Redis Feature Store**")
 
-# Metrics Row
 col1, col2, col3, col4 = st.columns(4)
 metric_safe = col1.empty()
 metric_fraud = col2.empty()
@@ -53,13 +44,11 @@ status_indicator = col4.empty()
 chart_placeholder = st.empty()
 table_placeholder = st.empty()
 
-# State
 if 'rows' not in st.session_state:
     st.session_state.rows = []
 if 'stats' not in st.session_state:
     st.session_state.stats = {'safe': 0, 'fraud': 0, 'money_saved': 0}
 
-# --- PROCESSING LOOP ---
 def process_stream():
     msg = consumer.poll(0.1)
     
@@ -71,7 +60,6 @@ def process_stream():
 
     data = json.loads(msg.value().decode('utf-8'))
     
-    # 1. Feature Engineering (Redis)
     user_id = str(data.get('cardholder_age', 'unknown')) # Safety check
     key = f"user_{user_id}_count"
     velocity = redis.get(key)
@@ -79,7 +67,6 @@ def process_stream():
     redis.incr(key)
     redis.expire(key, 600)
     
-    # 2. Predict
     row = pd.DataFrame([data])
     row = pd.get_dummies(row, columns=['merchant_category'])
     for col in model_columns:
@@ -90,7 +77,6 @@ def process_stream():
     pred = model.predict(row)[0]
     prob = model.predict_proba(row)[0][1]
     
-    # 3. Update State
     is_fraud = pred == 1
     timestamp = time.strftime('%H:%M:%S')
     
@@ -113,7 +99,6 @@ def process_stream():
     else:
         st.session_state.stats['safe'] += 1
 
-    # --- REFRESH UI ---
     metric_safe.metric("Safe Transactions", st.session_state.stats['safe'])
     metric_fraud.metric("Fraud Detected", st.session_state.stats['fraud'], delta_color="inverse")
     metric_money.metric("Money Saved", f"${st.session_state.stats['money_saved']:.2f}")
