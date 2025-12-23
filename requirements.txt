@@ -1,0 +1,8 @@
+pandas
+scikit-learn
+joblib
+confluent-kafka
+upstash-redis
+streamlit
+altair
+python-dotenv
